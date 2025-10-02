@@ -171,6 +171,37 @@ func goldenTest(t *testing.T, name string) {
 	require.NoError(t, err)
 }
 
+func TestResizeSmallerWidth(t *testing.T) {
+	vt := midterm.NewTerminal(24, 200)
+
+	for i := range 24 {
+		fmt.Fprintf(vt, "Line %d with some content\n", i)
+	}
+
+	// Resize to a much smaller width - this should not panic
+	vt.Resize(24, 100)
+
+	buf := new(bytes.Buffer)
+	err := vt.Render(buf)
+	require.NoError(t, err)
+}
+
+func TestResizeGrowingHeightThenShrinkWidth(t *testing.T) {
+	vt := midterm.NewTerminal(20, 200)
+
+	for i := range 20 {
+		fmt.Fprintf(vt, "Line %d with content\n", i)
+	}
+
+	// Resize: grow height, shrink width
+	// This triggers resizeY to grow, then resizeX to shrink
+	vt.Resize(30, 188)
+
+	buf := new(bytes.Buffer)
+	err := vt.Render(buf)
+	require.NoError(t, err)
+}
+
 func eachFrame(r io.Reader, callback func(frame int, segment []byte)) {
 	eachNthFrame(r, 1, callback)
 }

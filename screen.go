@@ -118,14 +118,14 @@ func (v *Screen) resizeX(w int) {
 				v.clear(i, j, Format{})
 			}
 		}
+		v.Width = w
 	} else if w < v.Width {
+		v.Width = w
 		for i := range v.Content {
 			v.Content[i] = v.Content[i][:w]
 			v.changed(i, false)
 		}
 	}
-
-	v.Width = w
 
 	if v.Width != 0 && v.Cursor.X >= v.Width {
 		v.Cursor.X = v.Width - 1

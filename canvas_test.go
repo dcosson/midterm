@@ -779,6 +779,77 @@ func TestCanvasInsert(t *testing.T) {
 	}
 }
 
+func TestCanvasRowFormats(t *testing.T) {
+	t.Run("empty canvas returns nil", func(t *testing.T) {
+		canvas := &midterm.Canvas{}
+		require.Nil(t, canvas.RowFormats(0))
+	})
+
+	t.Run("nil row returns nil", func(t *testing.T) {
+		canvas := &midterm.Canvas{
+			Rows: []*midterm.Region{nil},
+		}
+		require.Nil(t, canvas.RowFormats(0))
+	})
+
+	t.Run("out of range returns nil", func(t *testing.T) {
+		canvas := &midterm.Canvas{
+			Rows: []*midterm.Region{
+				{F: red, Size: 3},
+			},
+		}
+		require.Nil(t, canvas.RowFormats(5))
+	})
+
+	t.Run("single region", func(t *testing.T) {
+		canvas := &midterm.Canvas{
+			Rows: []*midterm.Region{
+				{F: red, Size: 3},
+			},
+		}
+		formats := canvas.RowFormats(0)
+		require.Equal(t, []midterm.Format{red, red, red}, formats)
+	})
+
+	t.Run("multiple regions", func(t *testing.T) {
+		canvas := &midterm.Canvas{
+			Rows: []*midterm.Region{
+				{
+					F:    red,
+					Size: 2,
+					Next: &midterm.Region{
+						F:    green,
+						Size: 3,
+					},
+				},
+			},
+		}
+		formats := canvas.RowFormats(0)
+		require.Equal(t, []midterm.Format{red, red, green, green, green}, formats)
+	})
+
+	t.Run("three regions", func(t *testing.T) {
+		canvas := &midterm.Canvas{
+			Rows: []*midterm.Region{
+				{
+					F:    red,
+					Size: 1,
+					Next: &midterm.Region{
+						F:    green,
+						Size: 2,
+						Next: &midterm.Region{
+							F:    blue,
+							Size: 1,
+						},
+					},
+				},
+			},
+		}
+		formats := canvas.RowFormats(0)
+		require.Equal(t, []midterm.Format{red, green, green, blue}, formats)
+	})
+}
+
 func TestCanvasDelete(t *testing.T) {
 	t.Skip("WIP")
 	type paint struct {

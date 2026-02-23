@@ -524,13 +524,19 @@ func (v *Terminal) scrollDownN(n int) {
 }
 
 func (v *Terminal) scrollUpN(n int) {
-	if v.onScrollback != nil {
-		for i := 0; i < n; i++ {
-			// v.onScrollback(Line{v.Content[i], v.Format[i]})
-		}
-	}
 	// v.wrap = false // scroll up does NOT reset the wrap state.
 	start, end := v.scrollRegion()
+	if v.onScrollback != nil {
+		for i := 0; i < n; i++ {
+			row := start + i
+			if row < len(v.Content) {
+				v.onScrollback(Line{
+					Content: append([]rune(nil), v.Content[row]...),
+					Format:  v.Format.RowFormats(row),
+				})
+			}
+		}
+	}
 	scrollUp(v.Content, n, start, end, ' ')
 	scrollUpShallow(v.Format.Rows, n, start, end, func() *Region {
 		return &Region{Size: v.Width, F: v.Cursor.F}

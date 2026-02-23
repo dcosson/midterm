@@ -343,6 +343,21 @@ func (canvas *Canvas) ResizeX(w int) {
 	}
 }
 
+// RowFormats converts the Region-based format for a row into a flat []Format
+// slice with one entry per cell, suitable for constructing a Line.
+func (canvas *Canvas) RowFormats(row int) []Format {
+	if row >= len(canvas.Rows) || canvas.Rows[row] == nil {
+		return nil
+	}
+	var formats []Format
+	for r := canvas.Rows[row]; r != nil; r = r.Next {
+		for i := 0; i < r.Size; i++ {
+			formats = append(formats, r.F)
+		}
+	}
+	return formats
+}
+
 func (region *Region) String() string {
 	return fmt.Sprintf("%s:%d", region.F.Render(), region.Size)
 }

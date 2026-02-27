@@ -185,8 +185,8 @@ func (v *Terminal) IdentifyTerminal(b byte) {
 		dbg.Println("IdentifyTerminal: NO RESPONSE CHANNEL")
 		return
 	}
-	dbg.Println("IdentifyTerminal: RESPONDING VT102")
-	fmt.Fprint(v.ForwardResponses, termenv.CSI+"?62;22c") // VT220 + ANSI
+	dbg.Println("IdentifyTerminal: RESPONDING VT500")
+	fmt.Fprint(v.ForwardResponses, termenv.CSI+"?65;1;9c") // VT500 + 132-col + NRCS (xterm-compatible)
 }
 
 // Input inputs a rune to be displayed.

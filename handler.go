@@ -43,20 +43,28 @@ func (v *Terminal) ClearLine(mode ansicode.LineClearMode) {
 // ClearScreen clears the screen.
 func (v *Terminal) ClearScreen(mode ansicode.ClearMode) {
 	dbg.Println("ClearScreen", mode)
+	v.wrap = false
 	y, x, w, h := v.Cursor.Y, v.Cursor.X, v.Width, v.Height
+	f := v.Cursor.F
 	switch mode {
 	case ansicode.ClearModeBelow:
-		v.eraseRegion(y, x, h-1, w-1)
-		if y < h-1 {
-			v.eraseRegion(y+1, 0, h-1, w-1)
+		// clear from cursor to end of current line
+		v.eraseRegion(y, x, y, w-1)
+		// clear all lines below
+		for row := y + 1; row < h; row++ {
+			v.clearRow(row, f)
 		}
 	case ansicode.ClearModeAbove:
-		v.eraseRegion(0, 0, y, x)
-		if y > 0 {
-			v.eraseRegion(0, 0, y-1, w-1)
+		// clear all lines above
+		for row := 0; row < y; row++ {
+			v.clearRow(row, f)
 		}
+		// clear from beginning of current line to cursor
+		v.eraseRegion(y, 0, y, x)
 	case ansicode.ClearModeAll:
-		v.eraseRegion(0, 0, h-1, w-1)
+		for row := 0; row < h; row++ {
+			v.clearRow(row, f)
+		}
 	case ansicode.ClearModeSaved:
 		dbg.Println("TODO: ClearModeSaved")
 	}
@@ -383,6 +391,8 @@ func (v *Terminal) SetMode(mode ansicode.TerminalMode) {
 	switch mode {
 	case ansicode.TerminalModeCursorKeys:
 		forward = true
+	case ansicode.TerminalModeInsert:
+		v.insertMode = true
 	case ansicode.TerminalModeLineWrap:
 	case ansicode.TerminalModeBlinkingCursor:
 		epoch := time.Now()
@@ -619,6 +629,8 @@ func (v *Terminal) UnsetMode(mode ansicode.TerminalMode) {
 	switch mode {
 	case ansicode.TerminalModeCursorKeys:
 		forward = true
+	case ansicode.TerminalModeInsert:
+		v.insertMode = false
 	case ansicode.TerminalModeLineWrap:
 	case ansicode.TerminalModeBlinkingCursor:
 		v.CursorBlinkEpoch = nil

@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/danielgatis/go-ansicode"
+	"github.com/muesli/termenv"
 )
 
 // Terminal represents a raw terminal capable of handling VT100 and VT102 ANSI
@@ -51,6 +52,10 @@ type Terminal struct {
 	// to the next line if another character is printed.
 	wrap bool
 
+	// insertMode indicates whether printable input
+	// should shift row contents right.
+	insertMode bool
+
 	*ansicode.Decoder
 
 	// onResize is a hook called every time the terminal resizes.
@@ -59,6 +64,22 @@ type Terminal struct {
 	// onScrollack is a hook called every time a line is about to be pushed out
 	// of the visible screen region.
 	onScrollback OnScrollbackFunc
+
+	// SearchHighlights holds per-row highlight ranges, keyed by row index.
+	// Set by Search() or directly by the caller; consulted by renderLine.
+	SearchHighlights map[int][]SearchHighlight
+
+	// SearchMatchStyle is the Format override for non-current matches.
+	SearchMatchStyle Format
+
+	// SearchCurrentStyle is the Format override for the current match.
+	SearchCurrentStyle Format
+
+	// SearchMatches stores ordered match locations from the last Search() call.
+	SearchMatches []SearchMatch
+
+	// searchCache holds state from the previous Search() for incremental updates.
+	searchCache *searchState
 
 	// for synchronizing e.g. writes and async resizing
 	mut sync.Mutex
@@ -102,6 +123,16 @@ func NewAutoResizingTerminal() *Terminal {
 func NewTerminal(rows, cols int) *Terminal {
 	v := &Terminal{
 		Screen: newScreen(rows, cols),
+		SearchMatchStyle: Format{
+			Bg:         termenv.ANSIWhite,
+			Fg:         termenv.ANSIBlack,
+			Properties: ResetBit,
+		},
+		SearchCurrentStyle: Format{
+			Bg:         termenv.ANSIYellow,
+			Fg:         termenv.ANSIBlack,
+			Properties: ResetBit,
+		},
 	}
 	v.Decoder = ansicode.NewDecoder(v)
 	v.reset()
@@ -120,6 +151,7 @@ func (v *Terminal) Reset() {
 	v.mut.Lock()
 	defer v.mut.Unlock()
 	v.reset()
+	v.insertMode = false
 }
 
 func (v *Terminal) UsedHeight() int {
@@ -220,6 +252,9 @@ func (v *Terminal) put(r rune) {
 		v.wrap = false
 	}
 	x, y, f := v.Cursor.X, v.Cursor.Y, v.Cursor.F
+	if v.insertMode {
+		v.insertCharacters(1)
+	}
 	v.paint(y, x, f, r)
 	if y > v.MaxY {
 		v.MaxY = y

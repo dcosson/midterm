@@ -47,6 +47,12 @@ type Screen struct {
 	MaxY int
 	// MaxX is the maximum horizontal offset that a character has been printed.
 	MaxX int
+
+	// parent is a back-reference to the owning Terminal, used by ensureHeight
+	// to read the live AutoResizeY flag (which callers may toggle directly on
+	// the Terminal). nil for standalone Screens; in that case ensureHeight
+	// grows freely (preserving prior behavior for tests and direct users).
+	parent *Terminal
 }
 
 func newScreen(h, w int) *Screen {
@@ -92,12 +98,25 @@ func (v *Screen) resizeY(h int) {
 	}
 
 	if h > v.Height {
-		n := h - v.Height
-		for row := 0; row < n; row++ {
-			for col := 0; col < v.Width; col++ {
-				v.clear(v.Height+row, col, EmptyFormat)
+		// Grow Content/Changes directly. We can't use clear()/paint() because
+		// those route through ensureHeight, which is gated by AutoResizeY for
+		// fixed-height terminals — and a Resize must always honor the
+		// requested height regardless of AutoResizeY.
+		for v.Height < h {
+			row := make([]rune, v.Width)
+			for j := range row {
+				row[j] = ' '
 			}
+			v.Content = append(v.Content, row)
+			v.Changes = append(v.Changes, 1)
+			for col := 0; col < v.Width; col++ {
+				v.Format.Paint(v.Height, col, EmptyFormat)
+			}
+			v.Height++
 		}
+		// Don't fall through to v.Height = h below; we already updated it.
+		v.Height = h
+		return
 	} else if h < v.Height {
 		v.Content = v.Content[:h]
 		v.Changes = v.Changes[:h]
@@ -190,6 +209,15 @@ func (v *Screen) changed(y int, moveOnly bool) {
 }
 
 func (v *Screen) ensureHeight(targetY int) {
+	if v.parent != nil && !v.parent.AutoResizeY {
+		// Fixed-height terminal: never grow Content/Height past the configured
+		// size. Callers like insertLines, paint, and changed otherwise grow
+		// unconditionally, which silently turns a Resize-bound screen into an
+		// auto-resizing one and breaks any caller that anchors rendering to a
+		// known-fixed Height (e.g. h2's renderLiveView, which tracks Cursor.Y
+		// against ChildRows).
+		return
+	}
 	for y := v.Height; y <= targetY; y++ {
 		v.Content = append(v.Content, make([]rune, v.Width))
 		for x := 0; x < v.Width; x++ {

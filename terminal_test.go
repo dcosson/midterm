@@ -281,6 +281,78 @@ func TestResizeGrowingHeightThenShrinkWidth(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// TestFixedHeightDoesNotGrowOnInsertLines verifies that a terminal with
+// AutoResizeY=false (the default) does not silently grow its Height when
+// the child sends CSI L (insert lines). Before the fix, insertLines called
+// ensureHeight unconditionally, growing Content past the configured height.
+// Callers like h2's renderLiveView anchor rendering to a known-fixed Height,
+// so this hidden growth caused the visible window to slide and content above
+// the slid window to become unreachable until the next manual Resize.
+func TestFixedHeightDoesNotGrowOnInsertLines(t *testing.T) {
+	vt := midterm.NewTerminal(10, 80)
+	require.False(t, vt.AutoResizeY, "default Terminal must be fixed-height")
+
+	// Move to last row, then ask to insert 5 lines.
+	_, err := vt.Write([]byte("\033[10;1H"))
+	require.NoError(t, err)
+	require.Equal(t, 9, vt.Cursor.Y, "Goto must clamp to Height-1")
+
+	_, err = vt.Write([]byte("\033[5L"))
+	require.NoError(t, err)
+
+	require.Equal(t, 10, vt.Height, "Height must not grow when AutoResizeY=false")
+	require.Len(t, vt.Content, 10, "Content must not grow when AutoResizeY=false")
+}
+
+// TestFixedHeightDoesNotGrowOnPaintPastHeight verifies that paint() at a row
+// >= Height (which can happen if a caller bypasses Goto's clamp) does not
+// grow Content/Height when AutoResizeY=false.
+func TestFixedHeightDoesNotGrowOnPaintPastHeight(t *testing.T) {
+	vt := midterm.NewTerminal(10, 80)
+
+	// Drive a typical TUI redraw pattern: many newlines (scroll), then home,
+	// then a small redraw. None of this should grow Height.
+	for i := 0; i < 100; i++ {
+		_, err := fmt.Fprintf(vt, "line %d\r\n", i)
+		require.NoError(t, err)
+	}
+	_, err := vt.Write([]byte("\033[H"))
+	require.NoError(t, err)
+	for i := 0; i < 5; i++ {
+		_, err := fmt.Fprintf(vt, "redraw %d\r\n", i)
+		require.NoError(t, err)
+	}
+
+	require.Equal(t, 10, vt.Height, "Height must stay at 10 throughout TUI redraw cycle")
+	require.Len(t, vt.Content, 10, "Content must stay at 10 rows")
+}
+
+// TestAutoResizeYStillGrows verifies the back-reference doesn't break the
+// AutoResizeY=true path used by h2's Scrollback terminal and others.
+func TestAutoResizeYStillGrows(t *testing.T) {
+	vt := midterm.NewTerminal(10, 80)
+	vt.AutoResizeY = true
+	for i := 0; i < 50; i++ {
+		_, err := fmt.Fprintf(vt, "line %d\r\n", i)
+		require.NoError(t, err)
+	}
+	require.Greater(t, vt.Height, 10, "AutoResizeY=true must let Height grow past initial")
+	require.GreaterOrEqual(t, len(vt.Content), vt.Height)
+}
+
+// TestResizeStillGrowsWhenFixedHeight verifies that an explicit Resize(rows,cols)
+// still grows the screen even when AutoResizeY=false (the resize itself is the
+// authority on the new height; ensureHeight's gate must not block it).
+func TestResizeStillGrowsWhenFixedHeight(t *testing.T) {
+	vt := midterm.NewTerminal(10, 80)
+	require.False(t, vt.AutoResizeY)
+
+	vt.Resize(20, 80)
+
+	require.Equal(t, 20, vt.Height, "Resize must grow Height regardless of AutoResizeY")
+	require.Len(t, vt.Content, 20)
+}
+
 func TestInsertModePreservesShiftedContentAcrossLines(t *testing.T) {
 	term := midterm.NewTerminal(24, 80)
 	term.Raw = true

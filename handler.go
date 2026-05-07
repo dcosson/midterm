@@ -416,6 +416,7 @@ func (v *Terminal) SetMode(mode ansicode.TerminalMode) {
 			if v.Alt == nil {
 				dbg.Println("ALLOCATING ALT SCREEN")
 				v.Alt = newScreen(v.Height, v.Width)
+				v.Alt.parent = v
 			}
 			v.swapAlt()
 		}

@@ -134,6 +134,7 @@ func NewTerminal(rows, cols int) *Terminal {
 			Properties: ResetBit,
 		},
 	}
+	v.Screen.parent = v
 	v.Decoder = ansicode.NewDecoder(v)
 	v.reset()
 	return v

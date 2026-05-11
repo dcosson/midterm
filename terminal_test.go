@@ -281,6 +281,96 @@ func TestResizeGrowingHeightThenShrinkWidth(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// TestShrinkResizeClampsCursorAndScrollRegion verifies that resizeY clamps
+// Cursor.Y, SavedCursor.Y, and ScrollRegion so the next paint cannot index
+// Content out of range. This regressed when ensureHeight was gated by
+// AutoResizeY: previously paint silently regrew Content past the new Height
+// (a different bug that hid this one). Now, paint must operate within the
+// post-resize bounds.
+//
+// Reproduces the codex-mid-session-resize freeze: a TUI on a tall terminal
+// has cursor at row 30 and scroll region rows 1..45. User unplugs a monitor,
+// terminal shrinks to 25 rows. Without clamping, the next byte the child
+// writes panics in Screen.paint(30, ...) → index out of range.
+func TestShrinkResizeClampsCursorAndScrollRegion(t *testing.T) {
+	vt := midterm.NewTerminal(50, 100)
+	_, err := vt.Write([]byte("\033[1;45r")) // scroll region rows 1..45
+	require.NoError(t, err)
+	require.NotNil(t, vt.ScrollRegion)
+	require.Equal(t, 0, vt.ScrollRegion.Start)
+	require.Equal(t, 44, vt.ScrollRegion.End)
+
+	// Walk the cursor past where the new height will land.
+	for i := 0; i < 30; i++ {
+		_, _ = fmt.Fprintf(vt, "line %d\r\n", i)
+	}
+	require.Equal(t, 30, vt.Cursor.Y)
+
+	// User unplugs the monitor: shrink to 25 rows. Without the clamp, Cursor.Y
+	// would stay at 30 and ScrollRegion.End at 44 — both past Height-1=24.
+	vt.Resize(25, 100)
+
+	require.Equal(t, 25, vt.Height)
+	require.LessOrEqual(t, vt.Cursor.Y, vt.Height-1,
+		"Cursor.Y must not exceed Height-1 after shrink resize")
+	require.LessOrEqual(t, vt.SavedCursor.Y, vt.Height-1,
+		"SavedCursor.Y must not exceed Height-1 after shrink resize")
+	if vt.ScrollRegion != nil {
+		require.LessOrEqual(t, vt.ScrollRegion.End, vt.Height-1,
+			"ScrollRegion.End must not exceed Height-1 after shrink resize")
+		require.Less(t, vt.ScrollRegion.Start, vt.ScrollRegion.End,
+			"ScrollRegion must be valid (Start < End) or nil after resize")
+	}
+
+	// The acid test: writing anything must not panic.
+	_, err = vt.Write([]byte("hello after resize\r\n"))
+	require.NoError(t, err)
+}
+
+// TestShrinkResizeDropsUnusableScrollRegion verifies that a scroll region
+// that becomes inverted/zero-sized after a shrink is dropped to nil so the
+// terminal falls back to default full-screen scrolling. The child can
+// re-emit DECSTBM on its next render to install a new region.
+func TestShrinkResizeDropsUnusableScrollRegion(t *testing.T) {
+	vt := midterm.NewTerminal(50, 80)
+	// Scroll region at the bottom of a 50-row screen.
+	_, err := vt.Write([]byte("\033[40;48r"))
+	require.NoError(t, err)
+	require.NotNil(t, vt.ScrollRegion)
+
+	// Shrink so the entire scroll region is past the new last row.
+	vt.Resize(20, 80)
+
+	require.Nil(t, vt.ScrollRegion,
+		"unusable scroll region (entirely past new Height) must be dropped")
+}
+
+// TestSavedCursorClampedOnShrink verifies DECSC/DECRC survives a shrink.
+// DECSC saves Cursor.Y; DECRC restores it. If the save happened at a row
+// the resize then truncates away, DECRC must not place Cursor.Y past the
+// new bottom row.
+func TestSavedCursorClampedOnShrink(t *testing.T) {
+	vt := midterm.NewTerminal(50, 80)
+	for i := 0; i < 40; i++ {
+		_, _ = fmt.Fprintf(vt, "row %d\r\n", i)
+	}
+	_, err := vt.Write([]byte("\0337")) // DECSC: save cursor at Cursor.Y=40
+	require.NoError(t, err)
+	require.Equal(t, 40, vt.SavedCursor.Y)
+
+	vt.Resize(20, 80)
+	require.LessOrEqual(t, vt.SavedCursor.Y, 19)
+
+	// DECRC restore — Cursor.Y must land in bounds.
+	_, err = vt.Write([]byte("\0338"))
+	require.NoError(t, err)
+	require.LessOrEqual(t, vt.Cursor.Y, vt.Height-1)
+
+	// And the next write must not panic.
+	_, err = vt.Write([]byte("after"))
+	require.NoError(t, err)
+}
+
 // TestFixedHeightDoesNotGrowOnInsertLines verifies that a terminal with
 // AutoResizeY=false (the default) does not silently grow its Height when
 // the child sends CSI L (insert lines). Before the fix, insertLines called

@@ -123,6 +123,39 @@ func (v *Screen) resizeY(h int) {
 	}
 
 	v.Height = h
+	v.clampToHeight()
+}
+
+// clampToHeight enforces Cursor/SavedCursor/ScrollRegion invariants after a
+// height change. Without this, a shrink-resize leaves Cursor.Y past the new
+// last row — the next paint() then indexes Content out of range and panics
+// (a regression made visible once ensureHeight is gated by AutoResizeY:
+// previously, paint silently regrew the buffer).
+func (v *Screen) clampToHeight() {
+	if v.Height <= 0 {
+		return
+	}
+	last := v.Height - 1
+	if v.Cursor.Y > last {
+		v.Cursor.Y = last
+	}
+	if v.SavedCursor.Y > last {
+		v.SavedCursor.Y = last
+	}
+	if v.ScrollRegion != nil {
+		// Clamp End first; if Start ends up >= End, the region is unusable —
+		// drop it so default full-screen scrolling resumes. The child can
+		// re-emit DECSTBM with the new dimensions on its next render.
+		if v.ScrollRegion.End > last {
+			v.ScrollRegion.End = last
+		}
+		if v.ScrollRegion.Start > last {
+			v.ScrollRegion.Start = last
+		}
+		if v.ScrollRegion.Start >= v.ScrollRegion.End {
+			v.ScrollRegion = nil
+		}
+	}
 }
 
 func (v *Screen) resizeX(w int) {

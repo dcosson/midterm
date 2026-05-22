@@ -78,7 +78,7 @@ func (s *Screen) reset() {
 		s.Content[row] = make([]rune, s.Width)
 		for col := 0; col < s.Width; col++ {
 			s.Content[row][col] = ' '
-			s.Format.Paint(row, col, EmptyFormat)
+			s.Format.Paint(row, col, EmptyFormat, 0)
 		}
 	}
 	s.Cursor.X = 0
@@ -110,7 +110,7 @@ func (v *Screen) resizeY(h int) {
 			v.Content = append(v.Content, row)
 			v.Changes = append(v.Changes, 1)
 			for col := 0; col < v.Width; col++ {
-				v.Format.Paint(v.Height, col, EmptyFormat)
+				v.Format.Paint(v.Height, col, EmptyFormat, 0)
 			}
 			v.Height++
 		}
@@ -167,7 +167,7 @@ func (v *Screen) resizeX(w int) {
 			copy(row, v.Content[i])
 			v.Content[i] = row
 			for j := v.Width; j < w; j++ {
-				v.clear(i, j, Format{})
+				v.clear(i, j, Format{}, 0)
 			}
 		}
 		v.Width = w
@@ -184,12 +184,14 @@ func (v *Screen) resizeX(w int) {
 	}
 }
 
-func (v *Screen) clear(y, x int, format Format) {
-	v.paint(y, x, format, ' ')
+func (v *Screen) clear(y, x int, format Format, urlID uint32) {
+	v.paint(y, x, format, urlID, ' ')
 }
 
-// clearRow efficiently clears an entire row to spaces with the given format.
-func (v *Screen) clearRow(y int, format Format) {
+// clearRow efficiently clears an entire row to spaces with the given format
+// and hyperlink. Callers typically pass urlID=0 because erase semantics drop
+// the active link — only the BCE background carries over to blanked cells.
+func (v *Screen) clearRow(y int, format Format, urlID uint32) {
 	if y >= len(v.Content) {
 		return
 	}
@@ -197,11 +199,11 @@ func (v *Screen) clearRow(y int, format Format) {
 	for i := range row {
 		row[i] = ' '
 	}
-	v.Format.ClearRow(y, format)
+	v.Format.ClearRow(y, format, urlID)
 	v.changed(y, false)
 }
 
-func (v *Screen) paint(y, x int, format Format, r rune) {
+func (v *Screen) paint(y, x int, format Format, urlID uint32, r rune) {
 	v.ensureHeight(y)
 	row := v.Content[y]
 	for newX := len(row); newX <= x; newX++ {
@@ -209,7 +211,7 @@ func (v *Screen) paint(y, x int, format Format, r rune) {
 	}
 	row[x] = r
 	v.Content[y] = row
-	v.Format.Paint(y, x, format)
+	v.Format.Paint(y, x, format, urlID)
 	v.changed(y, false)
 }
 
@@ -255,7 +257,7 @@ func (v *Screen) ensureHeight(targetY int) {
 		v.Content = append(v.Content, make([]rune, v.Width))
 		for x := 0; x < v.Width; x++ {
 			v.Content[y][x] = ' '
-			v.Format.Paint(y, x, EmptyFormat)
+			v.Format.Paint(y, x, EmptyFormat, 0)
 		}
 		v.Changes = append(v.Changes, 1)
 		v.Height++

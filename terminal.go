@@ -81,6 +81,16 @@ type Terminal struct {
 	// searchCache holds state from the previous Search() for incremental updates.
 	searchCache *searchState
 
+	// urls is the intern table for OSC 8 hyperlink URIs. Index 0 is reserved
+	// for "no hyperlink"; subsequent indices map to unique URIs. Cells store
+	// only the index (via Region.URLID and Cursor.URLID), keeping per-cell
+	// memory small while preserving the URL for renderers to emit OSC 8.
+	urls []string
+
+	// urlIndex maps URI string back to its index in urls, for interning.
+	// Lazily allocated on first SetHyperlink.
+	urlIndex map[string]uint32
+
 	// for synchronizing e.g. writes and async resizing
 	mut sync.Mutex
 }
@@ -92,6 +102,12 @@ type Cursor struct {
 
 	// F is the format that will be displayed.
 	F Format
+
+	// URLID is the OSC 8 hyperlink interned URL ID currently active on the
+	// cursor. Cells painted while URLID != 0 are tagged with this ID; the
+	// renderer can look up the URI via Terminal.URL(id). Updated by
+	// SetHyperlink; independent of SGR so format resets do not close links.
+	URLID uint32
 
 	// S is the cursor style.
 	S ansicode.CursorStyle
@@ -138,6 +154,41 @@ func NewTerminal(rows, cols int) *Terminal {
 	v.Decoder = ansicode.NewDecoder(v)
 	v.reset()
 	return v
+}
+
+// URL returns the URI for the given interned URL ID, or "" if the ID is 0
+// (no link) or out of range.
+func (v *Terminal) URL(id uint32) string {
+	v.mut.Lock()
+	defer v.mut.Unlock()
+	return v.urlLocked(id)
+}
+
+func (v *Terminal) urlLocked(id uint32) string {
+	if id == 0 || int(id) >= len(v.urls) {
+		return ""
+	}
+	return v.urls[id]
+}
+
+// internURL returns the URL ID for uri, allocating a new one if needed.
+// Caller must hold v.mut. Empty uri returns 0.
+func (v *Terminal) internURL(uri string) uint32 {
+	if uri == "" {
+		return 0
+	}
+	if v.urlIndex == nil {
+		v.urlIndex = make(map[string]uint32)
+		// urls[0] reserved as the "no link" sentinel.
+		v.urls = []string{""}
+	}
+	if id, ok := v.urlIndex[uri]; ok {
+		return id
+	}
+	id := uint32(len(v.urls))
+	v.urls = append(v.urls, uri)
+	v.urlIndex[uri] = id
+	return id
 }
 
 // Write writes the input sequence to the terminal.
@@ -252,11 +303,11 @@ func (v *Terminal) put(r rune) {
 		v.moveDown()
 		v.wrap = false
 	}
-	x, y, f := v.Cursor.X, v.Cursor.Y, v.Cursor.F
+	x, y, f, u := v.Cursor.X, v.Cursor.Y, v.Cursor.F, v.Cursor.URLID
 	if v.insertMode {
 		v.insertCharacters(1)
 	}
-	v.paint(y, x, f, r)
+	v.paint(y, x, f, u, r)
 	if y > v.MaxY {
 		v.MaxY = y
 	}
@@ -496,7 +547,10 @@ func insertEmpties[T any](arr [][]T, row, col, ps int, empty T) {
 
 func (v *Terminal) insertCharacters(n int) {
 	insertEmpties(v.Content, v.Cursor.Y, v.Cursor.X, n, ' ')
-	v.Format.Insert(v.Cursor.Y, v.Cursor.X, v.Cursor.F, n)
+	// Insert-mode spaces inherit the cursor's active hyperlink: they were
+	// "written" while OSC 8 was open, matching xterm's behavior of letting
+	// the link extend across blank cells that the program produced.
+	v.Format.Insert(v.Cursor.Y, v.Cursor.X, v.Cursor.F, v.Cursor.URLID, n)
 	v.changed(v.Cursor.Y, false)
 }
 
@@ -510,8 +564,11 @@ func (v *Terminal) deleteCharacters(n int) {
 func (v *Terminal) eraseCharacters(n int) {
 	v.wrap = false // erase characters resets the wrap state.
 	eraseCharacters(v.Content, v.Cursor.Y, v.Cursor.X, n, ' ')
+	// Erase paints with cursor format (preserving BCE background) but drops
+	// the hyperlink — semantically the cells are blanked, not "written under
+	// the open link." Style-bg vs link split mirrors xterm.
 	for i := 0; i < n; i++ {
-		v.Format.Paint(v.Cursor.Y, v.Cursor.X+i, v.Cursor.F)
+		v.Format.Paint(v.Cursor.Y, v.Cursor.X+i, v.Cursor.F, 0)
 	}
 	v.changed(v.Cursor.Y, false)
 }
@@ -569,6 +626,7 @@ func (v *Terminal) scrollUpN(n int) {
 				v.onScrollback(Line{
 					Content: append([]rune(nil), v.Content[row]...),
 					Format:  v.Format.RowFormats(row),
+					URLIDs:  v.Format.RowURLIDs(row),
 				})
 			}
 		}
@@ -625,6 +683,8 @@ func (v *Terminal) eraseRegion(y1, x1, y2, x2 int) {
 	if x1 > x2 && x2 > 0 {
 		x1, x2 = x2, x1
 	}
+	// Erase paints with cursor format (BCE) but URLID=0: erased cells lose
+	// the hyperlink even when an OSC 8 is still open on the cursor.
 	f := v.Cursor.F
 	for y := y1; y <= y2; y++ {
 		if len(v.Content) <= y {
@@ -636,7 +696,7 @@ func (v *Terminal) eraseRegion(y1, x1, y2, x2 int) {
 			rowX2 = len(v.Content[y]) - 1
 		}
 		for x := x1; x <= rowX2; x++ {
-			v.clear(y, x, f)
+			v.clear(y, x, f, 0)
 		}
 	}
 }

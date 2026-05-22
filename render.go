@@ -41,6 +41,10 @@ func (vt *Terminal) RenderLineFgBg(w io.Writer, row int, fg, bg termenv.Color) e
 type Line struct {
 	Content []rune
 	Format  []Format
+	// URLIDs holds the per-cell OSC 8 hyperlink ID, paralleling Content and
+	// Format. May be nil if the line had no hyperlinks. Resolve via
+	// Terminal.URL(id) — the table is owned by the Terminal, not the Line.
+	URLIDs []uint32
 }
 
 func (line Line) Display() string {

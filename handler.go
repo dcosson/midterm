@@ -45,6 +45,8 @@ func (v *Terminal) ClearScreen(mode ansicode.ClearMode) {
 	dbg.Println("ClearScreen", mode)
 	v.wrap = false
 	y, x, w, h := v.Cursor.Y, v.Cursor.X, v.Width, v.Height
+	// Clear paints with cursor format (BCE) but URLID=0: erase drops the
+	// hyperlink even when OSC 8 is still open on the cursor.
 	f := v.Cursor.F
 	switch mode {
 	case ansicode.ClearModeBelow:
@@ -52,18 +54,18 @@ func (v *Terminal) ClearScreen(mode ansicode.ClearMode) {
 		v.eraseRegion(y, x, y, w-1)
 		// clear all lines below
 		for row := y + 1; row < h; row++ {
-			v.clearRow(row, f)
+			v.clearRow(row, f, 0)
 		}
 	case ansicode.ClearModeAbove:
 		// clear all lines above
 		for row := 0; row < y; row++ {
-			v.clearRow(row, f)
+			v.clearRow(row, f, 0)
 		}
 		// clear from beginning of current line to cursor
 		v.eraseRegion(y, 0, y, x)
 	case ansicode.ClearModeAll:
 		for row := 0; row < h; row++ {
-			v.clearRow(row, f)
+			v.clearRow(row, f, 0)
 		}
 	case ansicode.ClearModeSaved:
 		dbg.Println("TODO: ClearModeSaved")
@@ -369,9 +371,16 @@ func (v *Terminal) SetDynamicColor(prefix string, index int, terminator string) 
 	dbg.Printf("SetDynamicColor: prefix=%s, index=%d, terminator=%s (ignored)\n", prefix, index, terminator)
 }
 
-// SetHyperlink sets the hyperlink.
+// SetHyperlink sets (or clears) the cursor's active OSC 8 hyperlink. When
+// non-nil, subsequent cell paints inherit the interned URL ID; when nil (or
+// when the URI is empty) the link is closed and subsequent paints carry no
+// link. OSC 8 lives outside SGR, so format resets do not affect this state.
 func (v *Terminal) SetHyperlink(hyperlink *ansicode.Hyperlink) {
-	dbg.Println("TODO: SetHyperlink", hyperlink)
+	if hyperlink == nil || hyperlink.URI == "" {
+		v.Cursor.URLID = 0
+		return
+	}
+	v.Cursor.URLID = v.internURL(hyperlink.URI)
 }
 
 // SetKeyboardMode sets the keyboard mode.
@@ -598,11 +607,14 @@ func (v *Terminal) Tab(n int) {
 		target = v.Width - 1
 	}
 	format := v.Cursor.F
+	urlID := v.Cursor.URLID
 	for x := v.Cursor.X; x < target; x++ {
 		if v.AutoResizeX {
 			v.put(' ')
 		} else {
-			v.clear(v.Cursor.Y, x, format)
+			// Tab traverses cells with cursor format+link active: matches put()
+			// behavior, so a tab inside an OSC 8 span keeps the link on the gap.
+			v.clear(v.Cursor.Y, x, format, urlID)
 		}
 	}
 	v.Cursor.X = target

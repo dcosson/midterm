@@ -403,7 +403,7 @@ func TestCanvasPaint(t *testing.T) {
 			canvas := &midterm.Canvas{}
 			for _, p := range ex.Paints {
 				t.Logf("painting %+v", p)
-				canvas.Paint(p.row, p.col, p.f)
+				canvas.Paint(p.row, p.col, p.f, 0)
 			}
 			require.Equal(t, ex.Result, canvas)
 		})
@@ -769,9 +769,9 @@ func TestCanvasInsert(t *testing.T) {
 			for _, p := range ex.Paints {
 				t.Logf("painting %+v", p)
 				if p.insert == 0 {
-					canvas.Paint(p.row, p.col, p.f)
+					canvas.Paint(p.row, p.col, p.f, 0)
 				} else {
-					canvas.Insert(p.row, p.col, p.f, p.insert)
+					canvas.Insert(p.row, p.col, p.f, 0, p.insert)
 				}
 			}
 			require.Equal(t, ex.Result, canvas)
@@ -1238,7 +1238,7 @@ func TestCanvasDelete(t *testing.T) {
 			for _, p := range ex.Paints {
 				t.Logf("painting %+v", p)
 				if p.delete == 0 {
-					canvas.Paint(p.row, p.col, p.f)
+					canvas.Paint(p.row, p.col, p.f, 0)
 				} else {
 					canvas.Delete(p.row, p.col, p.delete)
 				}

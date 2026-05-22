@@ -122,6 +122,50 @@ func TestHyperlink_EmptyURIClosesLink(t *testing.T) {
 	require.Equal(t, "", urls[1])
 }
 
+func TestHyperlink_EraseWithZeroPs(t *testing.T) {
+	// CSI 0 X means "erase 1 character" per ECMA-48. The generic erase helper
+	// normalizes that, and the Terminal.eraseCharacters loop has to match —
+	// otherwise the content is blanked but the URLID stays put, leaving a
+	// "blank cell that still hovers/clicks the URL."
+	vt := midterm.NewTerminal(1, 10)
+	fmt.Fprintf(vt, "%sabc%s", osc8("https://example.com"), osc8(""))
+	// Move cursor to col 0, ECH with Ps=0 (should erase one char).
+	fmt.Fprintf(vt, "\x1b[1G\x1b[0X")
+
+	urls := rowURLs(t, vt, 0)
+	require.Equal(t, "", urls[0], "ECH 0 should drop the link on the first cell")
+	require.Equal(t, "https://example.com", urls[1])
+	require.Equal(t, "https://example.com", urls[2])
+}
+
+func TestHyperlink_EraseOversizedPs(t *testing.T) {
+	// CSI 999 X on a 10-wide row should clamp to the row width and clear
+	// every URLID + char in range, not stamp links past the row edge.
+	vt := midterm.NewTerminal(1, 10)
+	fmt.Fprintf(vt, "%sabcde%s", osc8("https://example.com"), osc8(""))
+	fmt.Fprintf(vt, "\x1b[1G\x1b[999X")
+
+	urls := rowURLs(t, vt, 0)
+	for i := 0; i < 10; i++ {
+		require.Equal(t, "", urls[i], "cell %d should be blanked", i)
+	}
+}
+
+func TestHyperlink_InsertedLinesAreBlank(t *testing.T) {
+	// IL/DL/SU/SD fill new rows with cursor format (for BCE bg) but URLID=0.
+	// An active OSC 8 on the cursor must not leak onto rows that were never
+	// "written" by the program — only paint operations carry the link.
+	vt := midterm.NewTerminal(3, 10)
+	fmt.Fprintf(vt, "row0\r\nrow1\r\nrow2")
+	// Reposition to row 0, open a hyperlink (cursor now has an active link),
+	// then issue IL to push existing rows down.
+	fmt.Fprintf(vt, "\x1b[1;1H%s\x1b[L", osc8("https://link"))
+
+	// Row 0 (new blank row) and any URLIDs should be zero.
+	require.Nil(t, vt.Format.RowURLIDs(0),
+		"IL-inserted blank row should have no hyperlinks even while cursor link is active")
+}
+
 func TestHyperlink_NoLinkRowReturnsNil(t *testing.T) {
 	// Common-case optimization: rows with no hyperlinks return nil from
 	// RowURLIDs so callers can skip allocation.

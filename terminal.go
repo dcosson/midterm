@@ -563,6 +563,23 @@ func (v *Terminal) deleteCharacters(n int) {
 
 func (v *Terminal) eraseCharacters(n int) {
 	v.wrap = false // erase characters resets the wrap state.
+	// Normalize once: ECH with Ps=0 means 1 char (per ECMA-48), and clamp to
+	// row width so the Content blanking and Format repaint cannot diverge —
+	// the generic eraseCharacters helper does its own normalization but our
+	// Format loop has to match it exactly, or a 0/oversized n leaves URLIDs
+	// stamped while Content is already blanked.
+	if n <= 0 {
+		n = 1
+	}
+	if v.Cursor.Y < len(v.Content) {
+		row := v.Content[v.Cursor.Y]
+		if v.Cursor.X+n > len(row) {
+			n = len(row) - v.Cursor.X
+		}
+	}
+	if n <= 0 {
+		return
+	}
 	eraseCharacters(v.Content, v.Cursor.Y, v.Cursor.X, n, ' ')
 	// Erase paints with cursor format (preserving BCE background) but drops
 	// the hyperlink — semantically the cells are blanked, not "written under

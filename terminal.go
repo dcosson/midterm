@@ -302,6 +302,12 @@ func (v *Terminal) put(r rune) {
 		v.Cursor.X = 0
 		v.moveDown()
 		v.wrap = false
+		// Mark the new cursor row as a soft-wrap continuation of the row above.
+		// Outer renderers use this to preserve the wrap boundary (so terminal
+		// copy collapses wrapped rows into one logical line).
+		if v.Cursor.Y >= 0 && v.Cursor.Y < len(v.Wrapped) {
+			v.Wrapped[v.Cursor.Y] = true
+		}
 	}
 	x, y, f, u := v.Cursor.X, v.Cursor.Y, v.Cursor.F, v.Cursor.URLID
 	if v.insertMode {
@@ -604,6 +610,7 @@ func (v *Terminal) insertLines(n int) {
 	insertLinesShallow(v.Changes, v.Cursor.Y, n, start, end, func() uint64 {
 		return 1
 	})
+	insertLinesShallow(v.Wrapped, v.Cursor.Y, n, start, end, func() bool { return false })
 }
 
 func (v *Terminal) deleteLines(n int) {
@@ -619,6 +626,7 @@ func (v *Terminal) deleteLines(n int) {
 	deleteLinesShallow(v.Changes, v.Cursor.Y, n, start, end, func() uint64 {
 		return 1
 	})
+	deleteLinesShallow(v.Wrapped, v.Cursor.Y, n, start, end, func() bool { return false })
 }
 
 func (v *Terminal) scrollDownN(n int) {
@@ -631,6 +639,7 @@ func (v *Terminal) scrollDownN(n int) {
 	scrollDownShallow(v.Changes, n, start, end, func() uint64 {
 		return 1
 	})
+	scrollDownShallow(v.Wrapped, n, start, end, func() bool { return false })
 }
 
 func (v *Terminal) scrollUpN(n int) {
@@ -655,6 +664,7 @@ func (v *Terminal) scrollUpN(n int) {
 	scrollUpShallow(v.Changes, n, start, end, func() uint64 {
 		return 1
 	})
+	scrollUpShallow(v.Wrapped, n, start, end, func() bool { return false })
 }
 
 func (v *Terminal) scrollRegion() (int, int) {

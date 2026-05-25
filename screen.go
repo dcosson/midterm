@@ -22,6 +22,16 @@ type Screen struct {
 	// incremented.
 	Changes []uint64
 
+	// Wrapped[Y] is true when the first character on row Y was painted via
+	// DECAWM autowrap from row Y-1 — i.e. the inner program wrote a logical
+	// line longer than Width and the terminal soft-wrapped it. Outer
+	// renderers can use this to preserve the soft-wrap boundary (so copy
+	// collapses wrapped rows back into one line, hover-link detection spans
+	// rows, etc.). Reset on scrolls/inserts/clears so a row that gets
+	// overwritten loses the wrapped tag, but NOT reset on cursor moves —
+	// callers that need that finer-grained reset can do it themselves.
+	Wrapped []bool
+
 	// Cursor is the current state of the cursor.
 	Cursor Cursor
 
@@ -74,6 +84,7 @@ func (s *Screen) reset() {
 	s.Content = make([][]rune, s.Height)
 	s.Format = &Canvas{Width: s.Width}
 	s.Changes = make([]uint64, s.Height)
+	s.Wrapped = make([]bool, s.Height)
 	for row := 0; row < s.Height; row++ {
 		s.Content[row] = make([]rune, s.Width)
 		for col := 0; col < s.Width; col++ {
@@ -109,6 +120,7 @@ func (v *Screen) resizeY(h int) {
 			}
 			v.Content = append(v.Content, row)
 			v.Changes = append(v.Changes, 1)
+			v.Wrapped = append(v.Wrapped, false)
 			for col := 0; col < v.Width; col++ {
 				v.Format.Paint(v.Height, col, EmptyFormat, 0)
 			}
@@ -120,6 +132,7 @@ func (v *Screen) resizeY(h int) {
 	} else if h < v.Height {
 		v.Content = v.Content[:h]
 		v.Changes = v.Changes[:h]
+		v.Wrapped = v.Wrapped[:h]
 	}
 
 	v.Height = h
@@ -260,6 +273,7 @@ func (v *Screen) ensureHeight(targetY int) {
 			v.Format.Paint(y, x, EmptyFormat, 0)
 		}
 		v.Changes = append(v.Changes, 1)
+		v.Wrapped = append(v.Wrapped, false)
 		v.Height++
 	}
 }
